@@ -37,32 +37,10 @@ jobs:
             exit 1
           fi
 
-          HIST_DIR="data/chmi/historical"
-          RECENT_DIR="data/chmi/recent/${YEAR}"
-          mkdir -p "${HIST_DIR}" "${RECENT_DIR}"
-
-          HIST_URL="https://opendata.chmi.cz/meteorology/climate/historical/data/daily/dly-${STATION_WSI}.json"
-          HIST_FILE="${HIST_DIR}/dly-${STATION_WSI}.json"
-          curl --fail --silent --show-error --location --max-time 120 "${HIST_URL}" -o "${HIST_FILE}"
-
-          rm -f "${RECENT_DIR}/dly-${STATION_WSI}-${YEAR}"*.json
-
-          MONTHS_JSON=""
-          for MONTH in $(seq -w 1 12); do
-            RECENT_URL="https://opendata.chmi.cz/meteorology/climate/recent/data/daily/${MONTH}/dly-${STATION_WSI}-${YEAR}${MONTH}.json"
-            RECENT_FILE="${RECENT_DIR}/dly-${STATION_WSI}-${YEAR}${MONTH}.json"
-            if curl --fail --silent --show-error --location --max-time 120 "${RECENT_URL}" -o "${RECENT_FILE}"; then
-              if [[ -n "${MONTHS_JSON}" ]]; then
-                MONTHS_JSON="${MONTHS_JSON},"
-              fi
-              MONTHS_JSON="${MONTHS_JSON}\"${MONTH}\""
-            else
-              rm -f "${RECENT_FILE}"
-            fi
-          done
-
-          INDEX_FILE="${RECENT_DIR}/index.json"
-          printf '{"station":"%s","year":%s,"months":[%s]}\n' "${STATION_WSI}" "${YEAR}" "${MONTHS_JSON}" > "${INDEX_FILE}"
+          python3 scripts/update_chmi_local_data.py \
+            --station "${STATION_WSI}" \
+            --year "${YEAR}" \
+            --out data/chmi
 
       - name: Create Pull Request with data update
         uses: peter-evans/create-pull-request@v7

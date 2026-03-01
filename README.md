@@ -14,6 +14,7 @@ Aplikace je publikovaná na:
 - Aplikace už nenačítá data z externích URL v prohlížeči.
 - Data se čtou pouze z lokálních JSON souborů v `data/chmi`.
 - Aktualizace datasetů je řešená přes GitHub Action spuštěnou on-demand.
+- Do repozitáře se ukládají normalizovaná data pouze pro element `TMA` (kvůli velikosti souborů i rychlosti načítání).
 
 ## Aktualizace datasetů (on-demand)
 
@@ -25,6 +26,12 @@ Spusť workflow **Update CHMI Local Data** v GitHub Actions (`workflow_dispatch`
    - `data/chmi/recent/<year>/dly-0-203-0-11656-<year><month>.json`,
    - `data/chmi/recent/<year>/index.json`,
 3. při změně dat workflow vytvoří/aktualizuje Pull Request s daty.
+
+## Lokální aktualizace dat (bez Actions)
+
+```bash
+python3 scripts/update_chmi_local_data.py --year 2026 --station 0-203-0-11656 --out data/chmi
+```
 
 ## Lokální spuštění
 
