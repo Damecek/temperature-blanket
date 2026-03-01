@@ -28,7 +28,7 @@ Spusť workflow **Update CHMI Local Data** v GitHub Actions (`workflow_dispatch`
    - `data/chmi/historical/dly-0-203-0-11656.json`,
    - `data/chmi/recent/<year>/dly-0-203-0-11656-<year><month>.json`,
    - `data/chmi/recent/<year>/index.json`,
-3. při změně dat workflow commitne a pushne data do větve `chore/update-chmi-local-data` (PR případně vytvoř ručně).
+3. při změně dat workflow commitne a pushne data přímo do `main`.
 
 ## Lokální aktualizace dat (bez Actions)
 

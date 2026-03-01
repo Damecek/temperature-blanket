@@ -51,11 +51,9 @@ jobs:
             YEAR="$(date -u +%Y)"
           fi
 
-          BRANCH="chore/update-chmi-local-data"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git checkout -B "${BRANCH}"
           git add data/chmi
           if git diff --cached --quiet; then
             echo "No data changes to commit."
@@ -63,4 +61,4 @@ jobs:
           fi
 
           git commit -m "chore: update CHMI local datasets (${YEAR})"
-          git push --force-with-lease origin "${BRANCH}"
+          git push origin HEAD:main
