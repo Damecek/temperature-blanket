@@ -179,7 +179,7 @@
     <section class="card">
       <h1>Teplotní deka – Havlíčkův Brod</h1>
       <p>Zdroj: denní maximální teplota (TMA) z ČHMÚ stanice <strong>0-203-0-11656</strong>.</p>
-      <p>Pokud přímé načtení kvůli CORS selže, aplikace automaticky zkusí veřejný proxy endpoint a nakonec lokální snapshot v repozitáři.</p>
+      <p>Aplikace slučuje historická CSV data a průběžná recent JSON data (aktuální rok). Pokud přímé načtení kvůli CORS selže, zkusí veřejný proxy endpoint a nakonec lokální snapshot historie v repozitáři.</p>
 
       <div class="row">
         <label>Rok
@@ -211,13 +211,15 @@
   </div>
 
   <script>
-    const PRIMARY_DATA_URL = 'https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily/temperature/dly-0-203-0-11656-TMA.csv';
-    const LOCAL_FALLBACK_URL = './data/dly-0-203-0-11656-TMA.csv';
+    const STATION_WSI = '0-203-0-11656';
+    const HISTORICAL_DATA_URL = `https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily/temperature/dly-${STATION_WSI}-TMA.csv`;
+    const LOCAL_HISTORICAL_FALLBACK_URL = `./data/dly-${STATION_WSI}-TMA.csv`;
+    const RECENT_DAILY_BASE_URL = 'https://opendata.chmi.cz/meteorology/climate/recent/data/daily';
 
-    const DATA_SOURCES = [
-      { name: 'ČHMÚ (přímo)', url: PRIMARY_DATA_URL },
-      { name: 'ČHMÚ přes codetabs proxy', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(PRIMARY_DATA_URL)}` },
-      { name: 'Lokální snapshot', url: LOCAL_FALLBACK_URL }
+    const HISTORICAL_SOURCES = [
+      { name: 'historie ČHMÚ (přímo)', url: HISTORICAL_DATA_URL },
+      { name: 'historie ČHMÚ přes codetabs proxy', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(HISTORICAL_DATA_URL)}` },
+      { name: 'Lokální snapshot historie', url: LOCAL_HISTORICAL_FALLBACK_URL }
     ];
 
     const DEFAULT_STOPS = [
@@ -269,6 +271,32 @@
           temp: Number.isFinite(value) ? value : null
         };
       }).filter((row) => row.date instanceof Date && !Number.isNaN(row.date.getTime()));
+    }
+
+    function parseRecentJson(text) {
+      const parsed = JSON.parse(text);
+      const list = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.data)
+          ? parsed.data
+          : [];
+
+      return list.map((item) => {
+        const dt = item?.date ?? item?.dt ?? item?.datum ?? item?.DATE ?? '';
+        const tempRaw = item?.TMA ?? item?.value ?? item?.tma ?? item?.elements?.TMA;
+        const temp = Number.parseFloat(tempRaw);
+
+        return {
+          isoDate: dt,
+          date: dt ? new Date(dt) : null,
+          temp: Number.isFinite(temp) ? temp : null
+        };
+      }).filter((row) => row.date instanceof Date && !Number.isNaN(row.date.getTime()));
+    }
+
+    function recentMonthlyUrl(year, month) {
+      const mm = String(month).padStart(2, '0');
+      return `${RECENT_DAILY_BASE_URL}/${mm}/dly-${STATION_WSI}-${year}${mm}.json`;
     }
 
     function buildYearOptions(rows) {
@@ -406,15 +434,15 @@
       }).join('');
     }
 
-    async function fetchCsvText() {
+    async function fetchFromSources(sources, parser) {
       const errors = [];
-      for (const source of DATA_SOURCES) {
+      for (const source of sources) {
         try {
           const response = await fetch(source.url, { cache: 'no-store' });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const text = await response.text();
-          const rows = parseCsv(text);
-          if (!rows.length) throw new Error('CSV je prázdné nebo nečitelné');
+          const rows = parser(text);
+          if (!rows.length) throw new Error('Soubor je prázdný nebo nečitelný');
           return { rows, source: source.name };
         } catch (error) {
           errors.push(`${source.name}: ${error.message}`);
@@ -423,19 +451,60 @@
       throw new Error(errors.join(' | '));
     }
 
+    async function fetchHistoricalRows() {
+      return fetchFromSources(HISTORICAL_SOURCES, parseCsv);
+    }
+
+    async function fetchRecentRows() {
+      const year = new Date().getUTCFullYear();
+      const successSources = new Set();
+      const mergedRows = new Map();
+
+      for (let month = 1; month <= 12; month++) {
+        const directUrl = recentMonthlyUrl(year, month);
+        const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(directUrl)}`;
+        const monthSources = [
+          { name: 'recent ČHMÚ (přímo)', url: directUrl },
+          { name: 'recent ČHMÚ přes codetabs proxy', url: proxyUrl }
+        ];
+
+        try {
+          const { rows, source } = await fetchFromSources(monthSources, parseRecentJson);
+          successSources.add(source);
+          rows.forEach((row) => mergedRows.set(row.isoDate, row));
+        } catch {
+          // Některé měsíce ještě nemusí existovat.
+        }
+      }
+
+      return {
+        rows: [...mergedRows.values()].sort((a, b) => a.date - b.date),
+        source: successSources.size ? [...successSources].join(', ') : null
+      };
+    }
+
     async function loadData() {
-      setStatus('Načítám CSV z ČHMÚ…');
+      setStatus('Načítám historická a recent data z ČHMÚ…');
       el.reloadBtn.disabled = true;
       try {
-        const { rows, source } = await fetchCsvText();
+        const historical = await fetchHistoricalRows();
+        const recent = await fetchRecentRows();
+
+        const merged = new Map(historical.rows.map((row) => [row.isoDate, row]));
+        recent.rows.forEach((row) => merged.set(row.isoDate, row));
+        const rows = [...merged.values()].sort((a, b) => a.date - b.date);
 
         state.rows = rows;
         buildYearOptions(rows);
         renderSpectrumEditor();
         renderBlanket();
 
-        const sourceInfo = source === 'ČHMÚ (přímo)' ? source : `${source} (fallback)`;
-        setStatus(`Načteno ${rows.length} denních záznamů. Zdroj: ${sourceInfo}.`);
+        const sourceInfo = [
+          historical.source,
+          recent.source ? `+ ${recent.source}` : '+ recent data nebyla k dispozici'
+        ].join(' ');
+
+        setStatus(`Načteno ${rows.length} denních záznamů (historie + recent). Zdroj: ${sourceInfo}.`);
       } catch (err) {
         console.error(err);
         setStatus(`Nepodařilo se načíst data: ${err.message}.`, true);
