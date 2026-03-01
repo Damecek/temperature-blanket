@@ -19,6 +19,7 @@ Tyto instrukce platí pro celý repozitář.
 - Samostatný endpoint pouze pro jeden prvek (např. `TMA`) je podle PDF k dispozici u `historical_csv`: `.../historical_csv/data/daily/temperature/dly-{WSI}-{PRVEK}.csv`.
 - Pro aktuální rok (`recent`) není v PDF uvedena analogická denní cesta „jen TMA“; je nutná filtrace na `TMA` při zpracování dat.
 - Praktické pravidlo pro tento projekt: ukládat do repozitáře normalizované lokální JSON soubory už filtrované na `TMA`, aby byly malé a stabilní pro GitHub Pages.
+- Preferovaná implementace updateru: historical brát z `historical_csv` TMA endpointu; recent brát z `recent` JSON a filtrovat na `TMA`.
 
 ## Ověření před commitem
 - Otestuj lokálně přes statický server (`python3 -m http.server`).

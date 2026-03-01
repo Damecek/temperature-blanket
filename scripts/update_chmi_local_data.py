@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -156,18 +158,47 @@ def dedupe_rows(rows):
     return [by_date[k] for k in sorted(by_date.keys())]
 
 
+def parse_csv_rows(text):
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return []
+    rows = []
+    reader = csv.DictReader(lines)
+    for rec in reader:
+        element = clean_token(rec.get("ELEMENT") or rec.get("element")).upper()
+        if element and element != TARGET_ELEMENT:
+            continue
+        dt_raw = clean_token(rec.get("DT") or rec.get("DATE") or rec.get("date"))
+        date_value = dt_raw[:10] if len(dt_raw) >= 10 else dt_raw
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_value):
+            continue
+        try:
+            temp = float(clean_token(rec.get("VALUE") or rec.get("value")))
+        except Exception:
+            continue
+        rows.append({"date": date_value, "TMA": temp})
+    return rows
+
+
 def fetch_text(url):
-    with urlopen(url, timeout=120) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    try:
+        with urlopen(url, timeout=120) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        result = subprocess.run(
+            ["curl", "--fail", "--silent", "--show-error", "--location", "--max-time", "120", url],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout
 
 
 def fetch_optional_text(url):
     try:
         return fetch_text(url)
-    except HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
+    except Exception:
+        return None
 
 
 def main():
@@ -189,9 +220,12 @@ def main():
 
     station = args.station
 
-    hist_url = f"https://opendata.chmi.cz/meteorology/climate/historical/data/daily/dly-{station}.json"
+    hist_url = (
+        "https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily/temperature/"
+        f"dly-{station}-{TARGET_ELEMENT}.csv"
+    )
     hist_text = fetch_text(hist_url)
-    hist_rows = dedupe_rows(parse_daily_json(hist_text))
+    hist_rows = dedupe_rows(parse_csv_rows(hist_text))
     if not hist_rows:
         print("Historický dataset je prázdný po filtraci na TMA.", file=sys.stderr)
         return 1

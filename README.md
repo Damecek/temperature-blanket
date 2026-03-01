@@ -15,6 +15,9 @@ Aplikace je publikovaná na:
 - Data se čtou pouze z lokálních JSON souborů v `data/chmi`.
 - Aktualizace datasetů je řešená přes GitHub Action spuštěnou on-demand.
 - Do repozitáře se ukládají normalizovaná data pouze pro element `TMA` (kvůli velikosti souborů i rychlosti načítání).
+- Zdrojová strategie při aktualizaci:
+  - historical: `historical_csv` endpoint pro `TMA`,
+  - recent: `recent` JSON endpointy, filtrované na `TMA`.
 
 ## Aktualizace datasetů (on-demand)
 
