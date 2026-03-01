@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   update:
@@ -42,17 +41,26 @@ jobs:
             --year "${YEAR}" \
             --out data/chmi
 
-      - name: Create Pull Request with data update
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore: update CHMI local datasets"
-          title: "chore: update CHMI local datasets"
-          body: |
-            Automated on-demand update of local CHMI datasets.
-            - historical: `data/chmi/historical/dly-0-203-0-11656.json`
-            - recent: `data/chmi/recent/<year>/...`
-          add-paths: |
-            data/chmi
-          branch: chore/update-chmi-local-data
-          delete-branch: true
+      - name: Commit and push data branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          YEAR="${{ github.event.inputs.year }}"
+          if [[ -z "${YEAR}" ]]; then
+            YEAR="$(date -u +%Y)"
+          fi
+
+          BRANCH="chore/update-chmi-local-data"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "${BRANCH}"
+          git add data/chmi
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: update CHMI local datasets (${YEAR})"
+          git push --force-with-lease origin "${BRANCH}"
