@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Teplotní deka – Havlíčkův Brod</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='0.9em' font-size='52'%3E%F0%9F%A7%A3%3C/text%3E%3C/svg%3E" />
   <style>
     :root {
       --bg: #0b1020;
@@ -178,6 +179,7 @@
     <section class="card">
       <h1>Teplotní deka – Havlíčkův Brod</h1>
       <p>Zdroj: denní maximální teplota (TMA) z ČHMÚ stanice <strong>0-203-0-11656</strong>.</p>
+      <p>Pokud přímé načtení kvůli CORS selže, aplikace automaticky zkusí veřejný proxy endpoint a nakonec lokální snapshot v repozitáři.</p>
 
       <div class="row">
         <label>Rok
@@ -209,7 +211,14 @@
   </div>
 
   <script>
-    const DATA_URL = 'https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily/temperature/dly-0-203-0-11656-TMA.csv';
+    const PRIMARY_DATA_URL = 'https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily/temperature/dly-0-203-0-11656-TMA.csv';
+    const LOCAL_FALLBACK_URL = './data/dly-0-203-0-11656-TMA.csv';
+
+    const DATA_SOURCES = [
+      { name: 'ČHMÚ (přímo)', url: PRIMARY_DATA_URL },
+      { name: 'ČHMÚ přes codetabs proxy', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(PRIMARY_DATA_URL)}` },
+      { name: 'Lokální snapshot', url: LOCAL_FALLBACK_URL }
+    ];
 
     const DEFAULT_STOPS = [
       { t: -20, color: '#3d1f86' },
@@ -397,22 +406,36 @@
       }).join('');
     }
 
+    async function fetchCsvText() {
+      const errors = [];
+      for (const source of DATA_SOURCES) {
+        try {
+          const response = await fetch(source.url, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const text = await response.text();
+          const rows = parseCsv(text);
+          if (!rows.length) throw new Error('CSV je prázdné nebo nečitelné');
+          return { rows, source: source.name };
+        } catch (error) {
+          errors.push(`${source.name}: ${error.message}`);
+        }
+      }
+      throw new Error(errors.join(' | '));
+    }
+
     async function loadData() {
       setStatus('Načítám CSV z ČHMÚ…');
       el.reloadBtn.disabled = true;
       try {
-        const response = await fetch(DATA_URL, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const text = await response.text();
-        const rows = parseCsv(text);
-
-        if (!rows.length) throw new Error('CSV je prázdné nebo nečitelné.');
+        const { rows, source } = await fetchCsvText();
 
         state.rows = rows;
         buildYearOptions(rows);
         renderSpectrumEditor();
         renderBlanket();
-        setStatus(`Načteno ${rows.length} denních záznamů.`);
+
+        const sourceInfo = source === 'ČHMÚ (přímo)' ? source : `${source} (fallback)`;
+        setStatus(`Načteno ${rows.length} denních záznamů. Zdroj: ${sourceInfo}.`);
       } catch (err) {
         console.error(err);
         setStatus(`Nepodařilo se načíst data: ${err.message}.`, true);
