@@ -179,7 +179,7 @@
     <section class="card">
       <h1>Teplotní deka – Havlíčkův Brod</h1>
       <p>Zdroj: denní maximální teplota (TMA) z ČHMÚ stanice <strong>0-203-0-11656</strong>.</p>
-      <p>Aplikace slučuje historická CSV data a průběžná recent JSON data (aktuální rok). Pokud přímé načtení kvůli CORS selže, zkusí veřejný proxy endpoint a nakonec lokální snapshot historie v repozitáři.</p>
+      <p>Aplikace načítá lokální JSON datasety v repozitáři (`data/chmi`): historická data a průběžná recent data (aktuální rok).</p>
 
       <div class="row">
         <label>Rok
@@ -212,15 +212,9 @@
 
   <script>
     const STATION_WSI = '0-203-0-11656';
-    const HISTORICAL_DATA_URL = `https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily/temperature/dly-${STATION_WSI}-TMA.csv`;
-    const LOCAL_HISTORICAL_FALLBACK_URL = `./data/dly-${STATION_WSI}-TMA.csv`;
-    const RECENT_DAILY_BASE_URL = 'https://opendata.chmi.cz/meteorology/climate/recent/data/daily';
-
-    const HISTORICAL_SOURCES = [
-      { name: 'historie ČHMÚ (přímo)', url: HISTORICAL_DATA_URL },
-      { name: 'historie ČHMÚ přes codetabs proxy', url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(HISTORICAL_DATA_URL)}` },
-      { name: 'Lokální snapshot historie', url: LOCAL_HISTORICAL_FALLBACK_URL }
-    ];
+    const TARGET_ELEMENT = 'TMA';
+    const LOCAL_DATA_BASE = './data/chmi';
+    const HISTORICAL_DAILY_LOCAL_FILE = `${LOCAL_DATA_BASE}/historical/dly-${STATION_WSI}.json`;
 
     const DEFAULT_STOPS = [
       { t: -20, color: '#3d1f86' },
@@ -255,53 +249,183 @@
       el.status.style.color = isError ? '#ff9090' : '';
     }
 
-    function parseCsv(text) {
-      const lines = text.trim().split('\n');
-      if (lines.length < 2) return [];
-
-      return lines.slice(1).map((line) => {
-        const parts = line.split(',');
-        const dt = parts[3] || '';
-        const valueRaw = parts[4] || '';
-        const value = Number.parseFloat(valueRaw);
-
-        return {
-          isoDate: dt,
-          date: dt ? new Date(dt) : null,
-          temp: Number.isFinite(value) ? value : null
-        };
-      }).filter((row) => row.date instanceof Date && !Number.isNaN(row.date.getTime()));
-    }
-
     function parseRecentJson(text) {
-      const parsed = JSON.parse(text);
-      const list = Array.isArray(parsed)
-        ? parsed
-        : Array.isArray(parsed?.data)
-          ? parsed.data
-          : [];
-
-      return list.map((item) => {
-        const dt = item?.date ?? item?.dt ?? item?.datum ?? item?.DATE ?? '';
-        const tempRaw = item?.TMA ?? item?.value ?? item?.tma ?? item?.elements?.TMA;
-        const temp = Number.parseFloat(tempRaw);
-
-        return {
-          isoDate: dt,
-          date: dt ? new Date(dt) : null,
-          temp: Number.isFinite(temp) ? temp : null
-        };
-      }).filter((row) => row.date instanceof Date && !Number.isNaN(row.date.getTime()));
+      return parseChmiDailyJson(text);
     }
 
-    function recentMonthlyUrl(year, month) {
+    function splitTuple(input) {
+      return input
+        .split(/[,;|\t]/)
+        .map((part) => cleanToken(part))
+        .filter((part) => part.length > 0);
+    }
+
+    function cleanToken(value) {
+      return String(value ?? '').replace(/^"+|"+$/g, '').trim();
+    }
+
+    function parseTupleItem(item) {
+      const parts = item.map(cleanToken);
+      const element = parts.find((part) => /^[A-Z]{3}$/.test(part));
+      if (element && element !== TARGET_ELEMENT) return null;
+
+      const dateIndex = parts.findIndex((part) => /^\d{4}-\d{2}-\d{2}$/.test(part));
+      if (dateIndex < 0) return null;
+
+      const dt = parts[dateIndex];
+      let temp = Number.NaN;
+      for (let i = dateIndex + 1; i < parts.length; i++) {
+        const parsed = Number.parseFloat(parts[i]);
+        if (Number.isFinite(parsed)) {
+          temp = parsed;
+          break;
+        }
+      }
+
+      return {
+        isoDate: dt,
+        date: dt ? new Date(dt) : null,
+        temp: Number.isFinite(temp) ? temp : null
+      };
+    }
+
+    function parseChmiTupleJson(text) {
+      const rows = [];
+      const re = /\{([^{}]+)\}/g;
+      let match;
+      while ((match = re.exec(text)) !== null) {
+        const tuple = splitTuple(match[1]);
+        const row = parseTupleItem(tuple);
+        if (row) rows.push(row);
+      }
+
+      if (!rows.length) {
+        const bracketRe = /\[([^[\]]+)\]/g;
+        while ((match = bracketRe.exec(text)) !== null) {
+          const tuple = splitTuple(match[1]);
+          const row = parseTupleItem(tuple);
+          if (row) rows.push(row);
+        }
+      }
+      return rows.filter((row) => row.date instanceof Date && !Number.isNaN(row.date.getTime()));
+    }
+
+    function parseJsonLines(text) {
+      const rows = [];
+      const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+      for (const line of lines) {
+        if (!line.startsWith('{') || !line.endsWith('}')) continue;
+        try {
+          const obj = JSON.parse(line);
+          const row = parseChmiDailyJson(JSON.stringify(obj));
+          rows.push(...row);
+        } catch {
+          // Ignorujeme nevalidní řádky.
+        }
+      }
+      return rows;
+    }
+
+    function extractDailyList(parsed) {
+      if (Array.isArray(parsed)) return parsed;
+      if (!parsed || typeof parsed !== 'object') return [];
+      if (Array.isArray(parsed.data)) return parsed.data;
+      if (Array.isArray(parsed.rows)) return parsed.rows;
+      if (Array.isArray(parsed.items)) return parsed.items;
+      if (Array.isArray(parsed.result)) return parsed.result;
+      if (Array.isArray(parsed.observations)) return parsed.observations;
+      if (Array.isArray(parsed.values)) return parsed.values;
+
+      const nestedText = parsed.contents ?? parsed.body ?? parsed.payload;
+      if (typeof nestedText === 'string' && nestedText.trim()) {
+        return extractDailyList(safeJsonParse(nestedText));
+      }
+
+      return [];
+    }
+
+    function safeJsonParse(text) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
+    }
+
+    function parseChmiDailyJson(text) {
+      const parsed = safeJsonParse(text);
+      if (parsed) {
+        const list = extractDailyList(parsed);
+
+        return list.map((item) => {
+          if (Array.isArray(item)) {
+            return parseTupleItem(item);
+          }
+
+          const element = item?.element ?? item?.ELEMENT ?? item?.el ?? item?.prvek ?? item?.code ?? item?.elementCode;
+          if (element && cleanToken(element).toUpperCase() !== TARGET_ELEMENT) return null;
+
+          const dt = item?.date ?? item?.dt ?? item?.datum ?? item?.DATE ?? item?.d ?? '';
+          const tempRaw = item?.TMA ?? item?.value ?? item?.tma ?? item?.elements?.TMA ?? item?.v;
+          const temp = Number.parseFloat(tempRaw);
+          return {
+            isoDate: dt,
+            date: dt ? new Date(dt) : null,
+            temp: Number.isFinite(temp) ? temp : null
+          };
+        }).filter((row) => row && row.date instanceof Date && !Number.isNaN(row.date.getTime()));
+      }
+
+      const tupleRows = parseChmiTupleJson(text);
+      if (tupleRows.length) return tupleRows;
+
+      return parseJsonLines(text);
+    }
+
+    function recentMonthlyLocalPath(year, month) {
       const mm = String(month).padStart(2, '0');
-      return `${RECENT_DAILY_BASE_URL}/${mm}/dly-${STATION_WSI}-${year}${mm}.json`;
+      return `${LOCAL_DATA_BASE}/recent/${year}/dly-${STATION_WSI}-${year}${mm}.json`;
+    }
+
+    function recentIndexLocalPath(year) {
+      return `${LOCAL_DATA_BASE}/recent/${year}/index.json`;
+    }
+
+    async function fetchLocalRows(path, parser, label, required = true) {
+      const response = await fetch(path, { cache: 'no-store' });
+      if (!response.ok) {
+        if (!required && response.status === 404) return [];
+        throw new Error(`${label}: HTTP ${response.status}`);
+      }
+      const text = await response.text();
+      const rows = parser(text);
+      if (!rows.length && required) throw new Error(`${label}: Soubor je prázdný nebo nečitelný`);
+      return rows;
+    }
+
+    async function fetchRecentMonths(year) {
+      const indexPath = recentIndexLocalPath(year);
+      try {
+        const response = await fetch(indexPath, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const parsed = await response.json();
+        const months = Array.isArray(parsed?.months) ? parsed.months : [];
+        return months
+          .map((m) => String(m).padStart(2, '0'))
+          .filter((m) => /^(0[1-9]|1[0-2])$/.test(m));
+      } catch {
+        return Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
+      }
     }
 
     function buildYearOptions(rows) {
       const years = [...new Set(rows.map((r) => r.date.getUTCFullYear()))].sort((a, b) => b - a);
       state.years = years;
+      if (!years.length) {
+        state.selectedYear = null;
+        el.yearSelect.innerHTML = '';
+        return;
+      }
       const nowYear = new Date().getUTCFullYear();
       state.selectedYear = years.includes(nowYear) ? nowYear : years[0];
 
@@ -403,6 +527,11 @@
 
     function renderBlanket() {
       const year = Number(el.yearSelect.value);
+      if (!Number.isFinite(year)) {
+        el.stats.innerHTML = '';
+        el.blanket.innerHTML = '';
+        return;
+      }
       state.selectedYear = year;
       const rows = getYearRows(year);
       const available = rows.filter((r) => r.temp != null);
@@ -434,57 +563,39 @@
       }).join('');
     }
 
-    async function fetchFromSources(sources, parser) {
-      const errors = [];
-      for (const source of sources) {
-        try {
-          const response = await fetch(source.url, { cache: 'no-store' });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const text = await response.text();
-          const rows = parser(text);
-          if (!rows.length) throw new Error('Soubor je prázdný nebo nečitelný');
-          return { rows, source: source.name };
-        } catch (error) {
-          errors.push(`${source.name}: ${error.message}`);
-        }
-      }
-      throw new Error(errors.join(' | '));
-    }
-
     async function fetchHistoricalRows() {
-      return fetchFromSources(HISTORICAL_SOURCES, parseCsv);
+      const rows = await fetchLocalRows(
+        HISTORICAL_DAILY_LOCAL_FILE,
+        parseChmiDailyJson,
+        'Lokální historický dataset',
+        true
+      );
+      return { rows, source: 'lokální historical JSON' };
     }
 
     async function fetchRecentRows() {
       const year = new Date().getUTCFullYear();
-      const successSources = new Set();
+      const months = await fetchRecentMonths(year);
       const mergedRows = new Map();
 
-      for (let month = 1; month <= 12; month++) {
-        const directUrl = recentMonthlyUrl(year, month);
-        const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(directUrl)}`;
-        const monthSources = [
-          { name: 'recent ČHMÚ (přímo)', url: directUrl },
-          { name: 'recent ČHMÚ přes codetabs proxy', url: proxyUrl }
-        ];
-
+      for (const mm of months) {
+        const path = recentMonthlyLocalPath(year, mm);
         try {
-          const { rows, source } = await fetchFromSources(monthSources, parseRecentJson);
-          successSources.add(source);
-          rows.forEach((row) => mergedRows.set(row.isoDate, row));
+          const rows = await fetchLocalRows(path, parseRecentJson, `Lokální recent dataset ${year}-${mm}`, false);
+          for (const row of rows) mergedRows.set(row.isoDate, row);
         } catch {
-          // Některé měsíce ještě nemusí existovat.
+          // Některé měsíce nemusí být ještě dostupné.
         }
       }
 
       return {
         rows: [...mergedRows.values()].sort((a, b) => a.date - b.date),
-        source: successSources.size ? [...successSources].join(', ') : null
+        source: 'lokální recent JSON'
       };
     }
 
     async function loadData() {
-      setStatus('Načítám historická a recent data z ČHMÚ…');
+      setStatus('Načítám lokální historical a recent JSON datasety…');
       el.reloadBtn.disabled = true;
       try {
         const historical = await fetchHistoricalRows();
@@ -493,6 +604,9 @@
         const merged = new Map(historical.rows.map((row) => [row.isoDate, row]));
         recent.rows.forEach((row) => merged.set(row.isoDate, row));
         const rows = [...merged.values()].sort((a, b) => a.date - b.date);
+        if (!rows.length) {
+          throw new Error('Lokální dataset je prázdný. Spusť v GitHub Actions workflow "Update CHMI Local Data".');
+        }
 
         state.rows = rows;
         buildYearOptions(rows);

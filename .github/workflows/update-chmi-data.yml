@@ -1,0 +1,82 @@
+name: Update CHMI Local Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Rok pro recent datasety (YYYY). Pokud je prázdné, použije se aktuální rok UTC."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download CHMI datasets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          STATION_WSI="0-203-0-11656"
+          INPUT_YEAR="${{ github.event.inputs.year }}"
+          if [[ -n "${INPUT_YEAR}" ]]; then
+            YEAR="${INPUT_YEAR}"
+          else
+            YEAR="$(date -u +%Y)"
+          fi
+
+          if [[ ! "${YEAR}" =~ ^[0-9]{4}$ ]]; then
+            echo "Neplatný rok: ${YEAR}" >&2
+            exit 1
+          fi
+
+          HIST_DIR="data/chmi/historical"
+          RECENT_DIR="data/chmi/recent/${YEAR}"
+          mkdir -p "${HIST_DIR}" "${RECENT_DIR}"
+
+          HIST_URL="https://opendata.chmi.cz/meteorology/climate/historical/data/daily/dly-${STATION_WSI}.json"
+          HIST_FILE="${HIST_DIR}/dly-${STATION_WSI}.json"
+          curl --fail --silent --show-error --location --max-time 120 "${HIST_URL}" -o "${HIST_FILE}"
+
+          rm -f "${RECENT_DIR}/dly-${STATION_WSI}-${YEAR}"*.json
+
+          MONTHS_JSON=""
+          for MONTH in $(seq -w 1 12); do
+            RECENT_URL="https://opendata.chmi.cz/meteorology/climate/recent/data/daily/${MONTH}/dly-${STATION_WSI}-${YEAR}${MONTH}.json"
+            RECENT_FILE="${RECENT_DIR}/dly-${STATION_WSI}-${YEAR}${MONTH}.json"
+            if curl --fail --silent --show-error --location --max-time 120 "${RECENT_URL}" -o "${RECENT_FILE}"; then
+              if [[ -n "${MONTHS_JSON}" ]]; then
+                MONTHS_JSON="${MONTHS_JSON},"
+              fi
+              MONTHS_JSON="${MONTHS_JSON}\"${MONTH}\""
+            else
+              rm -f "${RECENT_FILE}"
+            fi
+          done
+
+          INDEX_FILE="${RECENT_DIR}/index.json"
+          printf '{"station":"%s","year":%s,"months":[%s]}\n' "${STATION_WSI}" "${YEAR}" "${MONTHS_JSON}" > "${INDEX_FILE}"
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/chmi
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+            exit 0
+          fi
+          YEAR="${{ github.event.inputs.year }}"
+          if [[ -z "${YEAR}" ]]; then
+            YEAR="$(date -u +%Y)"
+          fi
+          git commit -m "chore: update CHMI local datasets (${YEAR})"
+          git push

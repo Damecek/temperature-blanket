@@ -11,12 +11,20 @@ Aplikace je publikovaná na:
 ## Co bylo opraveno
 
 - 404 na `favicon.ico` je odstraněna přidáním explicitního favicon linku (SVG data URI).
-- Načítání dat řeší CORS fallback řetězem zdrojů:
-  1. přímý ČHMÚ CSV endpoint,
-  2. veřejný CORS proxy endpoint (`api.codetabs.com`),
-  3. lokální snapshot CSV v repozitáři (`data/dly-0-203-0-11656-TMA.csv`).
+- Aplikace už nenačítá data z externích URL v prohlížeči.
+- Data se čtou pouze z lokálních JSON souborů v `data/chmi`.
+- Aktualizace datasetů je řešená přes GitHub Action spuštěnou on-demand.
 
-Díky tomu stránka funguje i při CORS blokaci na GitHub Pages.
+## Aktualizace datasetů (on-demand)
+
+Spusť workflow **Update CHMI Local Data** v GitHub Actions (`workflow_dispatch`):
+
+1. volitelně zadej `year` (např. `2026`) pro recent datasety,
+2. workflow stáhne:
+   - `data/chmi/historical/dly-0-203-0-11656.json`,
+   - `data/chmi/recent/<year>/dly-0-203-0-11656-<year><month>.json`,
+   - `data/chmi/recent/<year>/index.json`,
+3. při změně dat workflow vytvoří commit a pushne ho do větve.
 
 ## Lokální spuštění
 
@@ -33,5 +41,6 @@ Pak otevřít:
 ## Struktura
 
 - `index.html` – UI + logika načítání a vykreslení.
-- `data/dly-0-203-0-11656-TMA.csv` – lokální fallback dataset.
+- `.github/workflows/update-chmi-data.yml` – on-demand aktualizace lokálních CHMI datasetů.
+- `data/chmi/` – lokální JSON datasety používané stránkou.
 - `AGENTS.md` – instrukce pro další úpravy repozitáře.
