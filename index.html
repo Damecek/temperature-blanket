@@ -420,13 +420,14 @@
 
     function buildYearOptions(rows) {
       const years = [...new Set(rows.map((r) => r.date.getUTCFullYear()))].sort((a, b) => b - a);
+      const nowYear = new Date().getUTCFullYear();
+      if (!years.includes(nowYear)) years.unshift(nowYear);
       state.years = years;
       if (!years.length) {
         state.selectedYear = null;
         el.yearSelect.innerHTML = '';
         return;
       }
-      const nowYear = new Date().getUTCFullYear();
       state.selectedYear = years.includes(nowYear) ? nowYear : years[0];
 
       el.yearSelect.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join('');

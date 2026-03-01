@@ -33,6 +33,16 @@ def extract_daily_list(parsed):
         value = parsed.get(key)
         if isinstance(value, list):
             return value
+        if isinstance(value, dict):
+            nested = extract_daily_list(value)
+            if nested:
+                return nested
+        if isinstance(value, str) and value.strip():
+            nested_parsed = safe_json_parse(value)
+            if nested_parsed is not None:
+                nested = extract_daily_list(nested_parsed)
+                if nested:
+                    return nested
     nested = parsed.get("contents") or parsed.get("body") or parsed.get("payload")
     if isinstance(nested, str) and nested.strip():
         nested_parsed = safe_json_parse(nested)
@@ -46,11 +56,20 @@ def parse_tuple_item(item):
     if element and element != TARGET_ELEMENT:
         return None
 
-    date_index = next((idx for idx, part in enumerate(parts) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", part or "")), -1)
+    date_index = next(
+        (
+            idx
+            for idx, part in enumerate(parts)
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", part or "")
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", part or "")
+        ),
+        -1,
+    )
     if date_index < 0:
         return None
 
-    date_value = parts[date_index]
+    date_raw = parts[date_index]
+    date_value = date_raw[:10] if len(date_raw) >= 10 else date_raw
     temp = None
     for token in parts[date_index + 1 :]:
         try:
