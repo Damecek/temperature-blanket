@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teplotní deka – Havlíčkův Brod</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --card: #151c33;
+      --text: #ecf0ff;
+      --muted: #9fb0de;
+      --line: #2f3a66;
+      --accent: #8fb3ff;
+      --missing: #2b2f44;
+      color-scheme: dark;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #1a2452 0%, var(--bg) 40%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 24px 16px 32px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .card {
+      background: color-mix(in srgb, var(--card) 92%, black 8%);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 14px 35px rgba(0,0,0,0.25);
+    }
+
+    h1, h2 { margin: 0 0 8px; }
+    p { margin: 4px 0; color: var(--muted); }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+      margin-top: 10px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    select, input, button {
+      font: inherit;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #121934;
+      color: var(--text);
+      padding: 8px 10px;
+    }
+
+    button {
+      cursor: pointer;
+      background: #223272;
+      border-color: #40549f;
+      color: white;
+      font-weight: 600;
+    }
+
+    button.secondary {
+      background: #1a2246;
+      border-color: #31417a;
+    }
+
+    #status {
+      margin-top: 8px;
+      min-height: 1.3em;
+    }
+
+    #legend {
+      margin-top: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      height: 24px;
+      background: #0f1430;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #legendScale {
+      position: absolute;
+      inset: 0;
+    }
+
+    .spectrum-list {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .stop-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .stop-row > label {
+      grid-template-columns: auto 110px;
+      align-items: center;
+      gap: 8px;
+      margin: 0;
+    }
+
+    .stats {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .blanket-wrap {
+      margin-top: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #0f1430;
+      overflow: auto;
+      max-height: 62vh;
+    }
+
+    .blanket {
+      display: grid;
+      grid-template-columns: 80px 1fr 80px;
+      min-width: 420px;
+      font-size: 0.82rem;
+    }
+
+    .day-row {
+      display: contents;
+    }
+
+    .cell {
+      padding: 6px 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .swatch {
+      min-height: 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .muted { color: var(--muted); }
+    .missing {
+      color: #b8bfd7;
+      font-style: italic;
+    }
+
+    @media (max-width: 700px) {
+      .blanket { grid-template-columns: 70px 1fr 70px; }
+      .stop-row { grid-template-columns: 1fr auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="card">
+      <h1>Teplotní deka – Havlíčkův Brod</h1>
+      <p>Zdroj: denní maximální teplota (TMA) z ČHMÚ stanice <strong>0-203-0-11656</strong>.</p>
+
+      <div class="row">
+        <label>Rok
+          <select id="yearSelect"></select>
+        </label>
+        <button id="reloadBtn" type="button">Načíst data</button>
+      </div>
+      <div id="status" class="muted"></div>
+    </section>
+
+    <section class="card">
+      <h2>Spektrum barev</h2>
+      <p>Nastavte teplotní body. Barva dne se určí lineární interpolací mezi dvěma nejbližšími body.</p>
+      <div id="legend"><div id="legendScale"></div></div>
+      <div class="spectrum-list" id="spectrumList"></div>
+      <div class="row">
+        <button id="addStopBtn" type="button" class="secondary">Přidat bod spektra</button>
+        <button id="resetStopsBtn" type="button" class="secondary">Výchozí spektrum</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Náhled deky</h2>
+      <div class="stats" id="stats"></div>
+      <div class="blanket-wrap">
+        <div class="blanket" id="blanket"></div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const DATA_URL = 'https://opendata.chmi.cz/meteorology/climate/historical_csv/data/daily/temperature/dly-0-203-0-11656-TMA.csv';
+
+    const DEFAULT_STOPS = [
+      { t: -20, color: '#3d1f86' },
+      { t: -5, color: '#2f78ff' },
+      { t: 8, color: '#3fc8ff' },
+      { t: 20, color: '#6fd76f' },
+      { t: 28, color: '#ffd35a' },
+      { t: 35, color: '#ef5b47' }
+    ];
+
+    const state = {
+      rows: [],
+      years: [],
+      selectedYear: null,
+      stops: structuredClone(DEFAULT_STOPS)
+    };
+
+    const el = {
+      yearSelect: document.getElementById('yearSelect'),
+      reloadBtn: document.getElementById('reloadBtn'),
+      status: document.getElementById('status'),
+      spectrumList: document.getElementById('spectrumList'),
+      addStopBtn: document.getElementById('addStopBtn'),
+      resetStopsBtn: document.getElementById('resetStopsBtn'),
+      legendScale: document.getElementById('legendScale'),
+      blanket: document.getElementById('blanket'),
+      stats: document.getElementById('stats')
+    };
+
+    function setStatus(message, isError = false) {
+      el.status.textContent = message;
+      el.status.style.color = isError ? '#ff9090' : '';
+    }
+
+    function parseCsv(text) {
+      const lines = text.trim().split('\n');
+      if (lines.length < 2) return [];
+
+      return lines.slice(1).map((line) => {
+        const parts = line.split(',');
+        const dt = parts[3] || '';
+        const valueRaw = parts[4] || '';
+        const value = Number.parseFloat(valueRaw);
+
+        return {
+          isoDate: dt,
+          date: dt ? new Date(dt) : null,
+          temp: Number.isFinite(value) ? value : null
+        };
+      }).filter((row) => row.date instanceof Date && !Number.isNaN(row.date.getTime()));
+    }
+
+    function buildYearOptions(rows) {
+      const years = [...new Set(rows.map((r) => r.date.getUTCFullYear()))].sort((a, b) => b - a);
+      state.years = years;
+      const nowYear = new Date().getUTCFullYear();
+      state.selectedYear = years.includes(nowYear) ? nowYear : years[0];
+
+      el.yearSelect.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join('');
+      el.yearSelect.value = String(state.selectedYear);
+    }
+
+    function getYearRows(year) {
+      const yearRows = state.rows.filter((r) => r.date.getUTCFullYear() === year);
+      const map = new Map(yearRows.map((r) => [r.date.toISOString().slice(0, 10), r]));
+
+      const start = Date.UTC(year, 0, 1);
+      const daysInYear = isLeapYear(year) ? 366 : 365;
+
+      const result = [];
+      for (let i = 0; i < daysInYear; i++) {
+        const date = new Date(start + i * 86400000);
+        const key = date.toISOString().slice(0, 10);
+        result.push({ date, temp: map.get(key)?.temp ?? null });
+      }
+      return result;
+    }
+
+    function isLeapYear(year) {
+      return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    }
+
+    function hexToRgb(hex) {
+      const cleaned = hex.replace('#', '').trim();
+      const chunked = cleaned.length === 3
+        ? cleaned.split('').map((c) => c + c)
+        : [cleaned.slice(0, 2), cleaned.slice(2, 4), cleaned.slice(4, 6)];
+      return chunked.map((c) => Number.parseInt(c, 16));
+    }
+
+    function rgbToHex([r, g, b]) {
+      return '#' + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+    }
+
+    function sortStops() {
+      state.stops.sort((a, b) => a.t - b.t);
+    }
+
+    function colorForTemp(temp) {
+      if (temp == null || Number.isNaN(temp)) return getComputedStyle(document.documentElement).getPropertyValue('--missing').trim() || '#2b2f44';
+      sortStops();
+      const stops = state.stops;
+
+      if (temp <= stops[0].t) return stops[0].color;
+      if (temp >= stops[stops.length - 1].t) return stops[stops.length - 1].color;
+
+      for (let i = 0; i < stops.length - 1; i++) {
+        const a = stops[i];
+        const b = stops[i + 1];
+        if (temp >= a.t && temp <= b.t) {
+          const ratio = (temp - a.t) / (b.t - a.t || 1);
+          const rgbA = hexToRgb(a.color);
+          const rgbB = hexToRgb(b.color);
+          const mixed = rgbA.map((v, idx) => v + (rgbB[idx] - v) * ratio);
+          return rgbToHex(mixed);
+        }
+      }
+      return '#999999';
+    }
+
+    function renderLegend() {
+      sortStops();
+      const min = state.stops[0].t;
+      const max = state.stops[state.stops.length - 1].t;
+      const span = max - min || 1;
+      const parts = state.stops.map((s) => {
+        const pos = ((s.t - min) / span * 100).toFixed(2);
+        return `${s.color} ${pos}%`;
+      }).join(', ');
+      el.legendScale.style.background = `linear-gradient(to right, ${parts})`;
+      el.legendScale.title = `Rozsah ${min} °C až ${max} °C`;
+    }
+
+    function renderSpectrumEditor() {
+      sortStops();
+      el.spectrumList.innerHTML = '';
+
+      state.stops.forEach((stop, index) => {
+        const row = document.createElement('div');
+        row.className = 'stop-row';
+        row.innerHTML = `
+          <label>
+            Teplota (°C)
+            <input type="number" step="0.1" value="${stop.t}" data-index="${index}" data-kind="temp" />
+          </label>
+          <input type="color" value="${stop.color}" data-index="${index}" data-kind="color" aria-label="Barva bodu ${index + 1}" />
+          <button type="button" class="secondary" data-index="${index}" data-kind="remove" ${state.stops.length <= 2 ? 'disabled' : ''}>Smazat</button>
+        `;
+        el.spectrumList.appendChild(row);
+      });
+
+      renderLegend();
+    }
+
+    function renderBlanket() {
+      const year = Number(el.yearSelect.value);
+      state.selectedYear = year;
+      const rows = getYearRows(year);
+      const available = rows.filter((r) => r.temp != null);
+      const min = available.length ? Math.min(...available.map((r) => r.temp)) : null;
+      const max = available.length ? Math.max(...available.map((r) => r.temp)) : null;
+
+      el.stats.innerHTML = `
+        <span>Rok: <strong>${year}</strong></span>
+        <span>Záznamů: <strong>${available.length}/${rows.length}</strong></span>
+        <span>Min: <strong>${min == null ? '—' : min.toFixed(1) + ' °C'}</strong></span>
+        <span>Max: <strong>${max == null ? '—' : max.toFixed(1) + ' °C'}</strong></span>
+      `;
+
+      const dateFmt = new Intl.DateTimeFormat('cs-CZ', { day: '2-digit', month: '2-digit' });
+
+      el.blanket.innerHTML = rows.map((r) => {
+        const color = colorForTemp(r.temp);
+        const day = dateFmt.format(r.date);
+        const tempText = r.temp == null ? 'bez dat' : `${r.temp.toFixed(1)} °C`;
+        const missingClass = r.temp == null ? 'missing' : '';
+
+        return `
+          <div class="day-row">
+            <div class="cell muted ${missingClass}">${day}</div>
+            <div class="swatch" style="background:${color}" title="${day} – ${tempText}"></div>
+            <div class="cell ${missingClass}">${tempText}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadData() {
+      setStatus('Načítám CSV z ČHMÚ…');
+      el.reloadBtn.disabled = true;
+      try {
+        const response = await fetch(DATA_URL, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        const rows = parseCsv(text);
+
+        if (!rows.length) throw new Error('CSV je prázdné nebo nečitelné.');
+
+        state.rows = rows;
+        buildYearOptions(rows);
+        renderSpectrumEditor();
+        renderBlanket();
+        setStatus(`Načteno ${rows.length} denních záznamů.`);
+      } catch (err) {
+        console.error(err);
+        setStatus(`Nepodařilo se načíst data: ${err.message}.`, true);
+      } finally {
+        el.reloadBtn.disabled = false;
+      }
+    }
+
+    el.yearSelect.addEventListener('change', renderBlanket);
+    el.reloadBtn.addEventListener('click', loadData);
+
+    el.spectrumList.addEventListener('input', (event) => {
+      const target = event.target;
+      const index = Number(target.dataset.index);
+      const kind = target.dataset.kind;
+      if (!Number.isInteger(index) || !kind) return;
+
+      if (kind === 'temp') {
+        const val = Number.parseFloat(target.value);
+        if (Number.isFinite(val)) state.stops[index].t = val;
+      } else if (kind === 'color') {
+        state.stops[index].color = target.value;
+      }
+
+      renderSpectrumEditor();
+      renderBlanket();
+    });
+
+    el.spectrumList.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target.dataset.kind !== 'remove') return;
+      const index = Number(target.dataset.index);
+      if (!Number.isInteger(index) || state.stops.length <= 2) return;
+      state.stops.splice(index, 1);
+      renderSpectrumEditor();
+      renderBlanket();
+    });
+
+    el.addStopBtn.addEventListener('click', () => {
+      sortStops();
+      const mid = state.stops[Math.floor((state.stops.length - 1) / 2)];
+      state.stops.push({ t: mid.t + 1, color: mid.color });
+      renderSpectrumEditor();
+      renderBlanket();
+    });
+
+    el.resetStopsBtn.addEventListener('click', () => {
+      state.stops = structuredClone(DEFAULT_STOPS);
+      renderSpectrumEditor();
+      renderBlanket();
+    });
+
+    loadData();
+  </script>
+</body>
+</html>
