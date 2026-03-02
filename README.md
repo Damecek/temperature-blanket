@@ -17,7 +17,7 @@ Aplikace je publikovaná na:
 - Do repozitáře se ukládají normalizovaná data pouze pro element `TMA` (kvůli velikosti souborů i rychlosti načítání).
 - Zdrojová strategie při aktualizaci:
   - historical: `historical_csv` endpoint pro `TMA`,
-  - recent: `recent` JSON endpointy, filtrované na `TMA`.
+  - recent: `recent` JSON endpointy, filtrované na `TMA` (`/daily/{MM}/...` a fallback `/daily/dly-{WSI}-{YYYYMM}.json`).
 
 ## Aktualizace datasetů (on-demand)
 

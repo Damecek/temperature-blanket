@@ -25,3 +25,17 @@ Tyto instrukce platí pro celý repozitář.
 - Otestuj lokálně přes statický server (`python3 -m http.server`).
 - Zkontroluj, že se stránka načte bez chyb v konzoli kvůli chybějícím assetům (např. favicon).
 - Pokud je to vizuální změna, pořiď screenshot.
+
+## Release a update dat přes `gh`
+- Cíl: změny v kódu poslat do `main` a pak ručně spustit workflow **Update CHMI Local Data**.
+- Doporučený postup:
+  1. `git status --short`
+  2. `git add <soubory>`
+  3. `git commit -m "..."` (anglicky, stručně)
+  4. `git push origin main`
+  5. `gh workflow run "Update CHMI Local Data" --ref main -f year=$(date +%Y)`
+  6. `gh run list --workflow "Update CHMI Local Data" --limit 1`
+  7. `gh run watch`
+- Poznámky:
+  - Pokud je potřeba konkrétní rok, nahraď `year=$(date +%Y)` explicitně (např. `-f year=2026`).
+  - Workflow po stažení dat samo commitne změny v `data/chmi` přímo do `main`, pokud jsou rozdíly.

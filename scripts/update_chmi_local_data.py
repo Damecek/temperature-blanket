@@ -257,11 +257,20 @@ def main():
     months = []
     for month in range(1, 13):
         mm = f"{month:02d}"
-        recent_url = (
+        recent_monthly_url = (
             "https://opendata.chmi.cz/meteorology/climate/recent/data/daily/"
             f"{mm}/dly-{station}-{args.year}{mm}.json"
         )
-        text = fetch_optional_text(recent_url)
+        recent_fallback_url = (
+            "https://opendata.chmi.cz/meteorology/climate/recent/data/daily/"
+            f"dly-{station}-{args.year}{mm}.json"
+        )
+
+        text = fetch_optional_text(recent_monthly_url)
+        source_url = recent_monthly_url
+        if text is None:
+            text = fetch_optional_text(recent_fallback_url)
+            source_url = recent_fallback_url
         if text is None:
             continue
         rows = dedupe_rows(parse_daily_json(text))
@@ -270,6 +279,7 @@ def main():
         out_file = recent_dir / f"dly-{station}-{args.year}{mm}.json"
         out_file.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
         months.append(mm)
+        print(f"Loaded recent {args.year}{mm} from {source_url}", file=sys.stderr)
 
     index_file = recent_dir / "index.json"
     index_file.write_text(
