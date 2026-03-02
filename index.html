@@ -103,6 +103,26 @@
       inset: 0;
     }
 
+    #legendMarkers {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .legend-marker {
+      position: absolute;
+      top: 0;
+      width: 14px;
+      height: 100%;
+      transform: translateX(-50%);
+      border: 2px solid rgba(255, 255, 255, 0.9);
+      border-radius: 6px;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+      cursor: ew-resize;
+      pointer-events: auto;
+      touch-action: none;
+    }
+
     .spectrum-list {
       margin-top: 10px;
       display: grid;
@@ -111,12 +131,13 @@
 
     .stop-row {
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      grid-template-columns: 1fr auto;
       gap: 8px;
       align-items: center;
     }
 
     .stop-row > label {
+      display: grid;
       grid-template-columns: auto 110px;
       align-items: center;
       gap: 8px;
@@ -193,7 +214,10 @@
     <section class="card">
       <h2>Spektrum barev</h2>
       <p>Nastavte teplotní body. Barva dne se určí lineární interpolací mezi dvěma nejbližšími body.</p>
-      <div id="legend"><div id="legendScale"></div></div>
+      <div id="legend">
+        <div id="legendScale"></div>
+        <div id="legendMarkers"></div>
+      </div>
       <div class="spectrum-list" id="spectrumList"></div>
       <div class="row">
         <button id="addStopBtn" type="button" class="secondary">Přidat bod spektra</button>
@@ -215,6 +239,16 @@
     const TARGET_ELEMENT = 'TMA';
     const LOCAL_DATA_BASE = './data/chmi';
     const HISTORICAL_DAILY_LOCAL_FILE = `${LOCAL_DATA_BASE}/historical/dly-${STATION_WSI}.json`;
+    const SPECTRUM_STORAGE_KEY = 'temperature-blanket-spectrum-v2';
+    const FIXED_RAINBOW_STOPS = [
+      { pos: 0.00, color: '#6b3bd1' },
+      { pos: 0.18, color: '#4a64d9' },
+      { pos: 0.36, color: '#3cb3ff' },
+      { pos: 0.54, color: '#6fd76f' },
+      { pos: 0.72, color: '#ffd35a' },
+      { pos: 0.86, color: '#f79a4f' },
+      { pos: 1.00, color: '#ef5b47' }
+    ];
 
     const DEFAULT_STOPS = [
       { t: -20, color: '#3d1f86' },
@@ -224,22 +258,100 @@
       { t: 28, color: '#ffd35a' },
       { t: 35, color: '#ef5b47' }
     ];
+    let nextStopId = 1;
+
+    function clamp01(value) {
+      return Math.max(0, Math.min(1, value));
+    }
+
+    function validHexColor(value) {
+      if (typeof value !== 'string') return null;
+      const trimmed = value.trim();
+      if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed.toLowerCase();
+      if (/^#[0-9a-fA-F]{3}$/.test(trimmed)) {
+        const expanded = trimmed.slice(1).split('').map((c) => c + c).join('');
+        return `#${expanded.toLowerCase()}`;
+      }
+      return null;
+    }
+
+    function paletteColorAt(position) {
+      const p = clamp01(position);
+      let left = FIXED_RAINBOW_STOPS[0];
+      let right = FIXED_RAINBOW_STOPS[FIXED_RAINBOW_STOPS.length - 1];
+      for (let i = 0; i < FIXED_RAINBOW_STOPS.length - 1; i++) {
+        const a = FIXED_RAINBOW_STOPS[i];
+        const b = FIXED_RAINBOW_STOPS[i + 1];
+        if (p >= a.pos && p <= b.pos) {
+          left = a;
+          right = b;
+          break;
+        }
+      }
+      const segment = right.pos - left.pos || 1;
+      const ratio = (p - left.pos) / segment;
+      const rgbA = hexToRgb(left.color);
+      const rgbB = hexToRgb(right.color);
+      const mixed = rgbA.map((v, idx) => v + (rgbB[idx] - v) * ratio);
+      return rgbToHex(mixed);
+    }
+
+    function findClosestPalettePosition(color) {
+      const targetRgb = hexToRgb(color);
+      let bestPos = 0.5;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (let i = 0; i <= 360; i++) {
+        const pos = i / 360;
+        const sample = hexToRgb(paletteColorAt(pos));
+        const distance =
+          (sample[0] - targetRgb[0]) ** 2 +
+          (sample[1] - targetRgb[1]) ** 2 +
+          (sample[2] - targetRgb[2]) ** 2;
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestPos = pos;
+        }
+      }
+      return bestPos;
+    }
+
+    function withStopId(stop, fallbackPos = 0.5) {
+      const rawPos = Number(stop?.p);
+      const normalizedColor = validHexColor(stop?.color);
+      const palettePos = Number.isFinite(rawPos)
+        ? clamp01(rawPos)
+        : (normalizedColor ? findClosestPalettePosition(normalizedColor) : clamp01(fallbackPos));
+      return {
+        id: stop?.id ?? nextStopId++,
+        t: Number.isFinite(Number(stop?.t)) ? Math.round(Number(stop.t)) : 0,
+        p: palettePos,
+        color: paletteColorAt(palettePos)
+      };
+    }
+
+    function defaultStops() {
+      const count = DEFAULT_STOPS.length;
+      return DEFAULT_STOPS.map((stop, index) => withStopId(stop, count > 1 ? index / (count - 1) : 0.5));
+    }
 
     const state = {
       rows: [],
       years: [],
       selectedYear: null,
-      stops: structuredClone(DEFAULT_STOPS)
+      stops: defaultStops(),
+      activeDragStopId: null
     };
 
     const el = {
       yearSelect: document.getElementById('yearSelect'),
       reloadBtn: document.getElementById('reloadBtn'),
       status: document.getElementById('status'),
+      legend: document.getElementById('legend'),
       spectrumList: document.getElementById('spectrumList'),
       addStopBtn: document.getElementById('addStopBtn'),
       resetStopsBtn: document.getElementById('resetStopsBtn'),
       legendScale: document.getElementById('legendScale'),
+      legendMarkers: document.getElementById('legendMarkers'),
       blanket: document.getElementById('blanket'),
       stats: document.getElementById('stats')
     };
@@ -470,6 +582,61 @@
       state.stops.sort((a, b) => a.t - b.t);
     }
 
+    function sanitizeStops(stops) {
+      if (!Array.isArray(stops)) {
+        state.stops = defaultStops();
+        return state.stops;
+      }
+      const total = stops.length;
+      const normalized = stops
+        .map((stop, index) => withStopId(stop, total > 1 ? index / (total - 1) : 0.5))
+        .filter((stop) => Number.isFinite(stop.t));
+      if (normalized.length < 2) {
+        state.stops = defaultStops();
+        return state.stops;
+      }
+      state.stops = normalized;
+      sortStops();
+      return state.stops;
+    }
+
+    function saveStopsToStorage() {
+      try {
+        localStorage.setItem(SPECTRUM_STORAGE_KEY, JSON.stringify(state.stops.map((s) => ({ t: s.t, p: s.p, color: s.color }))));
+      } catch {
+        // localStorage může být blokovaný režimem prohlížeče.
+      }
+    }
+
+    function loadStopsFromStorage() {
+      try {
+        const raw = localStorage.getItem(SPECTRUM_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        sanitizeStops(parsed);
+      } catch {
+        state.stops = defaultStops();
+      }
+    }
+
+    function findStopById(stopId) {
+      return state.stops.find((stop) => stop.id === stopId);
+    }
+
+    function updateStopColorByPointer(clientX) {
+      if (state.activeDragStopId == null) return;
+      const rect = el.legend.getBoundingClientRect();
+      if (!rect.width) return;
+      const ratio = clamp01((clientX - rect.left) / rect.width);
+      const stop = findStopById(state.activeDragStopId);
+      if (!stop) return;
+      stop.p = ratio;
+      stop.color = paletteColorAt(ratio);
+      saveStopsToStorage();
+      renderSpectrumEditor();
+      renderBlanket();
+    }
+
     function colorForTemp(temp) {
       if (temp == null || Number.isNaN(temp)) return getComputedStyle(document.documentElement).getPropertyValue('--missing').trim() || '#2b2f44';
       sortStops();
@@ -494,15 +661,23 @@
 
     function renderLegend() {
       sortStops();
-      const min = state.stops[0].t;
-      const max = state.stops[state.stops.length - 1].t;
-      const span = max - min || 1;
-      const parts = state.stops.map((s) => {
-        const pos = ((s.t - min) / span * 100).toFixed(2);
-        return `${s.color} ${pos}%`;
-      }).join(', ');
-      el.legendScale.style.background = `linear-gradient(to right, ${parts})`;
-      el.legendScale.title = `Rozsah ${min} °C až ${max} °C`;
+      const fixedGradient = FIXED_RAINBOW_STOPS
+        .map((item) => `${item.color} ${(item.pos * 100).toFixed(2)}%`)
+        .join(', ');
+      el.legendScale.style.background = `linear-gradient(to right, ${fixedGradient})`;
+      el.legendScale.title = 'Fixní duhová paleta pro výběr barvy bodů';
+      el.legendMarkers.innerHTML = '';
+
+      state.stops.forEach((stop, index) => {
+        const marker = document.createElement('button');
+        marker.type = 'button';
+        marker.className = 'legend-marker';
+        marker.dataset.stopId = String(stop.id);
+        marker.style.left = `${(clamp01(stop.p) * 100).toFixed(2)}%`;
+        marker.style.backgroundColor = stop.color;
+        marker.title = `Bod ${index + 1}: ${stop.t} °C`;
+        el.legendMarkers.appendChild(marker);
+      });
     }
 
     function renderSpectrumEditor() {
@@ -515,10 +690,9 @@
         row.innerHTML = `
           <label>
             Teplota (°C)
-            <input type="number" step="0.1" value="${stop.t}" data-index="${index}" data-kind="temp" />
+            <input type="number" step="1" value="${stop.t}" data-stop-id="${stop.id}" data-kind="temp" />
           </label>
-          <input type="color" value="${stop.color}" data-index="${index}" data-kind="color" aria-label="Barva bodu ${index + 1}" />
-          <button type="button" class="secondary" data-index="${index}" data-kind="remove" ${state.stops.length <= 2 ? 'disabled' : ''}>Smazat</button>
+          <button type="button" class="secondary" data-stop-id="${stop.id}" data-kind="remove" ${state.stops.length <= 2 ? 'disabled' : ''}>Smazat</button>
         `;
         el.spectrumList.appendChild(row);
       });
@@ -633,17 +807,18 @@
 
     el.spectrumList.addEventListener('input', (event) => {
       const target = event.target;
-      const index = Number(target.dataset.index);
+      const stopId = Number(target.dataset.stopId);
       const kind = target.dataset.kind;
-      if (!Number.isInteger(index) || !kind) return;
+      if (!Number.isInteger(stopId) || !kind) return;
+      const stop = findStopById(stopId);
+      if (!stop) return;
 
       if (kind === 'temp') {
-        const val = Number.parseFloat(target.value);
-        if (Number.isFinite(val)) state.stops[index].t = val;
-      } else if (kind === 'color') {
-        state.stops[index].color = target.value;
+        const val = Number(target.value);
+        if (Number.isFinite(val)) stop.t = Math.round(val);
       }
 
+      saveStopsToStorage();
       renderSpectrumEditor();
       renderBlanket();
     });
@@ -651,27 +826,55 @@
     el.spectrumList.addEventListener('click', (event) => {
       const target = event.target;
       if (target.dataset.kind !== 'remove') return;
-      const index = Number(target.dataset.index);
-      if (!Number.isInteger(index) || state.stops.length <= 2) return;
-      state.stops.splice(index, 1);
+      const stopId = Number(target.dataset.stopId);
+      if (!Number.isInteger(stopId) || state.stops.length <= 2) return;
+      state.stops = state.stops.filter((stop) => stop.id !== stopId);
+      saveStopsToStorage();
       renderSpectrumEditor();
       renderBlanket();
     });
 
     el.addStopBtn.addEventListener('click', () => {
       sortStops();
-      const mid = state.stops[Math.floor((state.stops.length - 1) / 2)];
-      state.stops.push({ t: mid.t + 1, color: mid.color });
+      const a = state.stops[Math.floor((state.stops.length - 1) / 2)];
+      const b = state.stops[Math.ceil((state.stops.length - 1) / 2)];
+      state.stops.push(withStopId({
+        t: Math.round((a.t + b.t) / 2),
+        p: (a.p + b.p) / 2
+      }));
+      saveStopsToStorage();
       renderSpectrumEditor();
       renderBlanket();
     });
 
     el.resetStopsBtn.addEventListener('click', () => {
-      state.stops = structuredClone(DEFAULT_STOPS);
+      state.stops = defaultStops();
+      saveStopsToStorage();
       renderSpectrumEditor();
       renderBlanket();
     });
 
+    el.legend.addEventListener('pointerdown', (event) => {
+      const marker = event.target.closest('.legend-marker');
+      if (!marker) return;
+      const stopId = Number(marker.dataset.stopId);
+      if (!Number.isInteger(stopId)) return;
+      state.activeDragStopId = stopId;
+      marker.setPointerCapture(event.pointerId);
+      updateStopColorByPointer(event.clientX);
+    });
+
+    window.addEventListener('pointermove', (event) => {
+      if (state.activeDragStopId == null) return;
+      updateStopColorByPointer(event.clientX);
+    });
+
+    window.addEventListener('pointerup', () => {
+      state.activeDragStopId = null;
+    });
+
+    loadStopsFromStorage();
+    sanitizeStops(state.stops);
     loadData();
   </script>
 </body>
