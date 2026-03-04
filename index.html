@@ -456,7 +456,14 @@
 
     function parseTupleItem(item) {
       const parts = item.map(cleanToken);
-      const element = parts.find((part) => /^[A-Z]{3}$/.test(part));
+      let element = null;
+      if (parts.length > 1 && /^[A-Za-z0-9]{3,12}$/.test(parts[1])) {
+        element = parts[1].toUpperCase();
+      }
+      if (!element) {
+        const fallbackElement = parts.find((part) => /^[A-Z]{3}$/.test(part));
+        element = fallbackElement ? fallbackElement.toUpperCase() : null;
+      }
       if (element && element !== TARGET_ELEMENT) return null;
 
       const dateIndex = parts.findIndex((part) => /^\d{4}-\d{2}-\d{2}$/.test(part));
