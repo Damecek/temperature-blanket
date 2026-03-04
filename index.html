@@ -179,8 +179,20 @@
     }
 
     .swatch {
+      position: relative;
       min-height: 20px;
       border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: transparent;
+    }
+
+    .swatch::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 33%;
+      bottom: 33%;
+      background: var(--swatch-color, #2b2f44);
     }
 
     .muted { color: var(--muted); }
@@ -816,7 +828,7 @@
         return `
           <div class="day-row">
             <div class="cell muted ${missingClass}">${day}</div>
-            <div class="swatch" style="background:${color}" title="${day} – ${tempText}"></div>
+            <div class="swatch" style="--swatch-color:${color}" title="${day} – ${tempText}"></div>
             <div class="cell ${missingClass}">${tempText}</div>
           </div>
         `;
@@ -890,22 +902,37 @@
     el.yearSelect.addEventListener('change', renderBlanket);
     el.reloadBtn.addEventListener('click', loadData);
 
-    el.spectrumList.addEventListener('input', (event) => {
-      const target = event.target;
+    function applyTempInput(target) {
       const stopId = Number(target.dataset.stopId);
-      const kind = target.dataset.kind;
-      if (!Number.isInteger(stopId) || !kind) return;
+      if (!Number.isInteger(stopId) || target.dataset.kind !== 'temp') return;
       const stop = findStopById(stopId);
       if (!stop) return;
 
-      if (kind === 'temp') {
-        const val = Number(target.value);
-        if (Number.isFinite(val)) stop.t = Math.round(val);
+      const val = Number(target.value);
+      if (!Number.isFinite(val)) {
+        target.value = String(stop.t);
+        return;
       }
 
+      stop.t = Math.round(val);
+      target.value = String(stop.t);
       saveStopsToStorage();
       renderSpectrumEditor();
       renderBlanket();
+    }
+
+    el.spectrumList.addEventListener('focusout', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      applyTempInput(target);
+    });
+
+    el.spectrumList.addEventListener('keydown', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (event.key !== 'Enter') return;
+      applyTempInput(target);
+      target.blur();
     });
 
     el.spectrumList.addEventListener('click', (event) => {
