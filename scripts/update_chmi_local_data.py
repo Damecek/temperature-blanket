@@ -52,7 +52,12 @@ def extract_daily_list(parsed):
 
 def parse_tuple_item(item):
     parts = [clean_token(x) for x in item]
-    element = next((part for part in parts if re.fullmatch(r"[A-Z]{3}", part or "")), None)
+    element = None
+    if len(parts) > 1 and re.fullmatch(r"[A-Za-z0-9]{3,12}", parts[1] or ""):
+        element = parts[1].upper()
+    if element is None:
+        fallback_element = next((part for part in parts if re.fullmatch(r"[A-Z]{3}", part or "")), None)
+        element = fallback_element.upper() if fallback_element else None
     if element and element != TARGET_ELEMENT:
         return None
 
