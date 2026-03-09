@@ -167,6 +167,7 @@
       grid-template-columns: 80px 1fr 80px;
       min-width: 420px;
       font-size: 0.82rem;
+      line-height: 1.15;
     }
 
     .day-row {
@@ -174,24 +175,14 @@
     }
 
     .cell {
-      padding: 6px 8px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
+      padding: 3px 8px;
+      min-height: 18px;
+      display: flex;
+      align-items: center;
     }
 
     .swatch {
-      position: relative;
-      min-height: 20px;
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-      background: transparent;
-    }
-
-    .swatch::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 33%;
-      bottom: 33%;
+      min-height: 18px;
       background: var(--swatch-color, #2b2f44);
     }
 
@@ -675,8 +666,8 @@
       return '#' + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
     }
 
-    function sortStops() {
-      state.stops.sort((a, b) => a.t - b.t);
+    function getStopsSortedByTemp() {
+      return [...state.stops].sort((a, b) => a.t - b.t);
     }
 
     function sanitizeStops(stops) {
@@ -693,7 +684,6 @@
         return state.stops;
       }
       state.stops = normalized;
-      sortStops();
       return state.stops;
     }
 
@@ -736,8 +726,7 @@
 
     function colorForTemp(temp) {
       if (temp == null || Number.isNaN(temp)) return getComputedStyle(document.documentElement).getPropertyValue('--missing').trim() || '#2b2f44';
-      sortStops();
-      const stops = state.stops;
+      const stops = getStopsSortedByTemp();
 
       if (temp <= stops[0].t) return stops[0].color;
       if (temp >= stops[stops.length - 1].t) return stops[stops.length - 1].color;
@@ -757,7 +746,6 @@
     }
 
     function renderLegend() {
-      sortStops();
       const fixedGradient = FIXED_RAINBOW_STOPS
         .map((item) => `${item.color} ${(item.pos * 100).toFixed(2)}%`)
         .join(', ');
@@ -765,7 +753,7 @@
       el.legendScale.title = 'Fixní duhová paleta pro výběr barvy bodů';
       el.legendMarkers.innerHTML = '';
 
-      state.stops.forEach((stop, index) => {
+      getStopsSortedByTemp().forEach((stop, index) => {
         const marker = document.createElement('button');
         marker.type = 'button';
         marker.className = 'legend-marker';
@@ -778,7 +766,6 @@
     }
 
     function renderSpectrumEditor() {
-      sortStops();
       el.spectrumList.innerHTML = '';
 
       state.stops.forEach((stop, index) => {
@@ -947,9 +934,9 @@
     });
 
     el.addStopBtn.addEventListener('click', () => {
-      sortStops();
-      const a = state.stops[Math.floor((state.stops.length - 1) / 2)];
-      const b = state.stops[Math.ceil((state.stops.length - 1) / 2)];
+      const sortedStops = getStopsSortedByTemp();
+      const a = sortedStops[Math.floor((sortedStops.length - 1) / 2)];
+      const b = sortedStops[Math.ceil((sortedStops.length - 1) / 2)];
       state.stops.push(withStopId({
         t: Math.round((a.t + b.t) / 2),
         p: (a.p + b.p) / 2
