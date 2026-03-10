@@ -184,6 +184,18 @@
     .swatch {
       min-height: 18px;
       background: var(--swatch-color, #2b2f44);
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      padding-right: 6px;
+    }
+
+    .swatch-check {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: #ffffff;
+      cursor: pointer;
     }
 
     .muted { color: var(--muted); }
@@ -321,6 +333,7 @@
     const LOCAL_DATA_BASE = './data/chmi';
     const HISTORICAL_DAILY_LOCAL_FILE = `${LOCAL_DATA_BASE}/historical/dly-${STATION_WSI}.json`;
     const SPECTRUM_STORAGE_KEY = 'temperature-blanket-spectrum-v2';
+    const COMPLETED_STORAGE_KEY = 'temperature-blanket-completed-v1';
     const FIXED_RAINBOW_STOPS = [
       { pos: 0.00, color: '#6b3bd1' },
       { pos: 0.18, color: '#4a64d9' },
@@ -420,7 +433,8 @@
       years: [],
       selectedYear: null,
       stops: defaultStops(),
-      activeDragStopId: null
+      activeDragStopId: null,
+      completedRowsByYear: {}
     };
 
     const el = {
@@ -706,6 +720,31 @@
       }
     }
 
+    function saveCompletedRowsToStorage() {
+      try {
+        localStorage.setItem(COMPLETED_STORAGE_KEY, JSON.stringify(state.completedRowsByYear));
+      } catch {
+        // localStorage může být blokovaný režimem prohlížeče.
+      }
+    }
+
+    function loadCompletedRowsFromStorage() {
+      try {
+        const raw = localStorage.getItem(COMPLETED_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object') return;
+
+        state.completedRowsByYear = Object.fromEntries(
+          Object.entries(parsed)
+            .filter(([year, isoDate]) => /^\d{4}$/.test(year) && /^\d{4}-\d{2}-\d{2}$/.test(String(isoDate)))
+            .map(([year, isoDate]) => [year, String(isoDate)])
+        );
+      } catch {
+        state.completedRowsByYear = {};
+      }
+    }
+
     function findStopById(stopId) {
       return state.stops.find((stop) => stop.id === stopId);
     }
@@ -803,6 +842,9 @@
       }
       state.selectedYear = year;
       const rows = getYearRows(year);
+      const rowIsoDates = rows.map((r) => r.date.toISOString().slice(0, 10));
+      const storedCompleted = state.completedRowsByYear[String(year)] ?? null;
+      const completedIso = storedCompleted && rowIsoDates.includes(storedCompleted) ? storedCompleted : null;
       const available = rows.filter((r) => r.temp != null);
       const min = available.length ? Math.min(...available.map((r) => r.temp)) : null;
       const max = available.length ? Math.max(...available.map((r) => r.temp)) : null;
@@ -816,16 +858,29 @@
 
       const dateFmt = new Intl.DateTimeFormat('cs-CZ', { day: '2-digit', month: '2-digit' });
 
-      el.blanket.innerHTML = rows.map((r) => {
+      el.blanket.innerHTML = rows.map((r, index) => {
         const color = colorForTemp(r.temp);
         const day = dateFmt.format(r.date);
+        const isoDate = r.date.toISOString().slice(0, 10);
+        const isCompleted = completedIso ? isoDate <= completedIso : false;
         const tempText = r.temp == null ? 'bez dat' : `${r.temp.toFixed(1)} °C`;
         const missingClass = r.temp == null ? 'missing' : '';
 
         return `
           <div class="day-row">
             <div class="cell muted ${missingClass}">${day}</div>
-            <div class="swatch" style="--swatch-color:${color}" title="${day} – ${tempText}"></div>
+            <div class="swatch" style="--swatch-color:${color}" title="${day} – ${tempText}">
+              <input
+                class="swatch-check"
+                type="checkbox"
+                data-kind="done"
+                data-year="${year}"
+                data-index="${index}"
+                data-iso-date="${isoDate}"
+                aria-label="Označit dokončenou řadu pro ${day}"
+                ${isCompleted ? 'checked' : ''}
+              />
+            </div>
             <div class="cell ${missingClass}">${tempText}</div>
           </div>
         `;
@@ -898,6 +953,34 @@
 
     el.yearSelect.addEventListener('change', renderBlanket);
     el.reloadBtn.addEventListener('click', loadData);
+
+    el.blanket.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (target.dataset.kind !== 'done') return;
+
+      const year = Number(target.dataset.year);
+      const index = Number(target.dataset.index);
+      if (!Number.isFinite(year) || !Number.isInteger(index)) return;
+
+      const rows = getYearRows(year);
+      let completedIsoDate = null;
+
+      if (target.checked) {
+        completedIsoDate = target.dataset.isoDate ?? null;
+      } else if (index > 0) {
+        completedIsoDate = rows[index - 1].date.toISOString().slice(0, 10);
+      }
+
+      if (completedIsoDate) {
+        state.completedRowsByYear[String(year)] = completedIsoDate;
+      } else {
+        delete state.completedRowsByYear[String(year)];
+      }
+
+      saveCompletedRowsToStorage();
+      renderBlanket();
+    });
 
     function applyTempInput(target) {
       const stopId = Number(target.dataset.stopId);
@@ -983,6 +1066,7 @@
     });
 
     loadStopsFromStorage();
+    loadCompletedRowsFromStorage();
     sanitizeStops(state.stops);
     loadData();
   </script>
