@@ -714,9 +714,19 @@
       if (state.activeDragStopId == null) return;
       const rect = el.legend.getBoundingClientRect();
       if (!rect.width) return;
-      const ratio = clamp01((clientX - rect.left) / rect.width);
+      const orderedStops = getStopsSortedByTemp();
       const stop = findStopById(state.activeDragStopId);
       if (!stop) return;
+
+      const activeIndex = orderedStops.findIndex((item) => item.id === stop.id);
+      if (activeIndex < 0) return;
+
+      const previousStop = orderedStops[activeIndex - 1] ?? null;
+      const nextStop = orderedStops[activeIndex + 1] ?? null;
+      const minRatio = previousStop ? clamp01(previousStop.p) : 0;
+      const maxRatio = nextStop ? clamp01(nextStop.p) : 1;
+      const ratio = Math.max(minRatio, Math.min(maxRatio, clamp01((clientX - rect.left) / rect.width)));
+
       stop.p = ratio;
       stop.color = paletteColorAt(ratio);
       saveStopsToStorage();
