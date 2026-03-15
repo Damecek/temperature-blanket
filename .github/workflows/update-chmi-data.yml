@@ -1,6 +1,9 @@
 name: Update CHMI Local Data
 
 on:
+  schedule:
+    # GitHub Actions cron běží v UTC; 16:00 UTC odpovídá 17:00 CET.
+    - cron: "0 16 * * *"
   workflow_dispatch:
     inputs:
       year:
